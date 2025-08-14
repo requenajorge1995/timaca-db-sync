@@ -106,22 +106,14 @@ def main():
                 T2.Comprador AS Comprador,
                 T3.fecha AS Fecha_OC,
                 T3.FechaConformada AS Conformada_OC,
-                T3.FechaAprobada AS Aprobada_OC,
-                T4.Nombre AS Descripcion_Cuenta,
-                T6.Numero AS Nro_OC,
-                T6.FechaEntrega AS Fecha_Est_Llegada,
-                T7.Fecha AS Fecha_Recepcion
+                T3.FechaAprobada AS Aprobada_OC
             FROM dbo.Requisicion AS T1
-            LEFT JOIN dbo.DetalleRequisicion AS T2 ON T1.Numero = T2.ID_Requisicion
-            LEFT JOIN dbo.Ordenes AS T3 ON T2.Numero = T3.ID_DetalleRequisicion
-            LEFT JOIN dbo.CuentasAux AS T4 ON T1.CuentaAux = T4.ID_Cuenta
-            LEFT JOIN dbo.DetalleOrdenes AS T6 ON T3.Numero = T6.Numero_Orden
-            LEFT JOIN dbo.Recepcion AS T7 ON T6.Numero = T7.ID_DetalleOrdenes
-            WHERE T1.Numero > ?
+            LEFT JOIN dbo.DetalleRequisicion AS T2 ON T1.Numero = T2.numero
+            LEFT JOIN dbo.Ordenes AS T3 ON T2.Numero = T3.numero
             ORDER BY T1.Numero ASC;
         """
 
-        cur.execute(query, last_request_number)
+        cur.execute(query)
         rows = cur.fetchall()
 
         if rows:
