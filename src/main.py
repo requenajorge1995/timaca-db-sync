@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import gspread
 import pyodbc
@@ -13,37 +13,17 @@ from .logger import get_logger
 # CONFIGURATION
 # =========================
 load_dotenv()
-LAST_REQUEST_NUMBER_FILE = "last_request_number.txt"
-DEFAULT_LAST_REQUEST_NUMBER = 0
 
 # GOOGLE SHEET CONFIG
 GOOGLE_SHEET_KEY = os.getenv("GOOGLE_SHEET_KEY")
 GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE")
 
+# DATE RANGE CONFIG
+DAYS_BACK = 365 * 5 
 
 # =========================
 # UTILITY FUNCTIONS
 # =========================
-def get_last_request_number():
-    """Reads the last processed request number from file."""
-    if not os.path.exists(LAST_REQUEST_NUMBER_FILE):
-        return DEFAULT_LAST_REQUEST_NUMBER
-    try:
-        with open(LAST_REQUEST_NUMBER_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            if not content:
-                return DEFAULT_LAST_REQUEST_NUMBER
-            return int(content)
-    except Exception:
-        return DEFAULT_LAST_REQUEST_NUMBER
-
-
-def save_last_request_number(last_request_number):
-    """Saves the last processed request number to file."""
-    with open(LAST_REQUEST_NUMBER_FILE, "w", encoding="utf-8") as f:
-        f.write(str(last_request_number))
-
-
 def get_connection():
     """Establishes and returns a database connection using environment variables."""
     conn_str = (
@@ -57,8 +37,16 @@ def get_connection():
     return pyodbc.connect(conn_str)
 
 
-def append_to_google_sheet(rows):
-    """Appends records to a Google Sheets spreadsheet."""
+def get_date_range():
+    """Calculates and returns the date range based on DAYS_BACK constant."""
+    today = date.today()
+    start_date = today - timedelta(days=DAYS_BACK)
+    end_date = today
+    return start_date, end_date
+
+
+def update_google_sheet(rows, headers=None):
+    """Overwrites Google Sheets data with new records."""
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         creds = Credentials.from_service_account_file(
@@ -72,12 +60,34 @@ def append_to_google_sheet(rows):
                 return value.strftime("%Y-%m-%d %H:%M:%S")
             return "" if value is None else str(value)
 
-        data_to_insert = [[serialize_value(cell) for cell in row] for row in rows]
+        sheet.clear()
+        data_to_insert = []
+        
+        if headers:
+            data_to_insert.append(headers)
+        
+        for row in rows:
+            data_to_insert.append([serialize_value(cell) for cell in row])
 
-        sheet.append_rows(data_to_insert, value_input_option="USER_ENTERED")
+        if data_to_insert:
+            sheet.update(
+                values=data_to_insert,
+                range_name="A1",
+                value_input_option="USER_ENTERED"
+            )
+            
     except Exception as e:
         raise RuntimeError(f"Error writing to Google Sheets: {e}")
 
+def fetch_sp_results(cur, sp_name, params):
+    """Executes a stored procedure and returns the first result set."""
+    cur.execute(f"EXEC {sp_name} " + ",".join("?" * len(params)), params)
+    while True:
+        try:
+            return cur.fetchall()
+        except pyodbc.ProgrammingError:
+            if not cur.nextset():
+                return []
 
 # =========================
 # MAIN PROCESS
@@ -85,55 +95,24 @@ def append_to_google_sheet(rows):
 def main():
     logger = get_logger()
     try:
-        logger.info("Starting database query")
+        logger.info("Starting stored procedure execution")
 
-        last_request_number = get_last_request_number()
-        logger.info(f"Last recorded request number: {last_request_number}")
+        start_date, end_date = get_date_range()
+        logger.info(f"Querying data from {start_date} to {end_date}")
 
         conn = get_connection()
         cur = conn.cursor()
 
-        query = """
-            SELECT
-                T1.Numero AS Nro_SC,
-                T1.FechaRequisicion AS Fecha_SC,
-                T1.Descripcion AS Descripcion_SC,
-                T1.CuentaAux AS Cuenta_Auxiliar,
-                T1.fechaaprobacionGte AS Aprobacion_SC,
-                T2.material AS Material,
-                T2.descripcion AS Descripcion_Material,
-                T2.FechaAsignada AS Fecha_Asignar_Comprador,
-                T2.Comprador AS Comprador,
-                T3.fecha AS Fecha_OC,
-                T3.FechaConformada AS Conformada_OC,
-                T3.FechaAprobada AS Aprobada_OC,
-                T4.Nombre AS Descripcion_Cuenta,
-                T6.Numero AS Nro_OC,
-                T6.FechaEntrega AS Fecha_Est_Llegada,
-                T7.Fecha AS Fecha_Recepcion
-            FROM dbo.Requisicion AS T1
-            LEFT JOIN dbo.DetalleRequisicion AS T2 ON T1.Numero = T2.ID_Requisicion
-            LEFT JOIN dbo.Ordenes AS T3 ON T2.Numero = T3.ID_DetalleRequisicion
-            LEFT JOIN dbo.CuentasAux AS T4 ON T1.CuentaAux = T4.ID_Cuenta
-            LEFT JOIN dbo.DetalleOrdenes AS T6 ON T3.Numero = T6.Numero_Orden
-            LEFT JOIN dbo.Recepcion AS T7 ON T6.Numero = T7.ID_DetalleOrdenes
-            WHERE T1.Numero > ?
-            ORDER BY T1.Numero ASC;
-        """
-
-        cur.execute(query, last_request_number)
-        rows = cur.fetchall()
-
+        rows = fetch_sp_results(cur, 'SPConsultaGl', [start_date, end_date])
+        headers = [column[0] for column in cur.description]
+        
         if rows:
-            append_to_google_sheet(rows)
-            logger.info(f"Records added to Google Sheets: {len(rows)}")
-
-            # Assuming Nro_SC is the first column in the result set
-            max_request_number = max(row[0] for row in rows)
-            save_last_request_number(max_request_number)
-            logger.info(f"Updated last request number to: {max_request_number}")
+            update_google_sheet(rows, headers)
+            logger.info(f"Google Sheet updated with {len(rows)} records")
+            logger.info(f"Date range: {start_date} to {end_date}")
         else:
-            logger.info("No new records found.")
+            logger.info("No records found for the specified date range.")
+            update_google_sheet([], headers)
 
         cur.close()
         conn.close()

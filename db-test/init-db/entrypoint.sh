@@ -16,4 +16,9 @@ echo "Running initialization script..."
     -S sqlserver -U sa -P 'YourStrong!Passw0rd' \
     -i /init.sql
 
-echo "Database initialized."
+echo "Creating stored procedure..."
+/opt/mssql-tools/bin/sqlcmd \
+    -S sqlserver -U sa -P 'YourStrong!Passw0rd' \
+    -i /stored-procedure.sql
+
+echo "Database initialized with stored procedure."

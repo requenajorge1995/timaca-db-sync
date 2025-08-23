@@ -16,5 +16,6 @@ services:
       - sqlserver
     volumes:
       - ./init-db/init.sql:/init.sql
+      - ./init-db/stored-procedure.sql:/stored-procedure.sql
       - ./init-db/entrypoint.sh:/entrypoint.sh
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
