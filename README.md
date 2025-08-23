@@ -1,10 +1,8 @@
-# SQL Server to Google Sheets Incremental Sync
+# SQL Server to Google Sheets Sync (Stored Procedure)
 
 ## Overview
 
-This Python script connects to a SQL Server database via pyodbc, retrieves only new records since the last execution based on the request number, and appends them to a Google Sheets document.
-
-The script stores the last processed request number in a local file `last_request_number.txt` so that each run only processes new data.
+This Python script connects to a SQL Server database via **pyodbc**, executes a stored procedure (`SPConsultaGl`) with a configurable date range, and **overwrites the entire Google Sheet** with the results.
 
 ---
 
@@ -78,11 +76,12 @@ python -m src.main
 
 ## How It Works
 
-1. Reads the last processed request number from last_request_number.txt (defaults to 0 if not found).
-2. Connects to SQL Server using pyodbc and environment variables.
-3. Executes a parameterized query to fetch only rows where T1.Numero is greater than the last stored request number.
-4. Appends results to Google Sheets using the Sheets API.
-5. Updates last_request_number.txt with the highest request number from the latest run.
+1. Calculates a date range based on `DAYS_BACK` (default: last 5 years).
+2. Connects to SQL Server using **pyodbc** and environment variables.
+3. Executes the stored procedure `SPConsultaGl @desde, @hasta`.
+4. Fetches the result set and extracts column headers.
+5. Clears the target Google Sheet and overwrites it with the new data.
+6. Logs the number of records written and the date range used.
 
 ---
 
@@ -90,4 +89,4 @@ python -m src.main
 
 - Ensure the ODBC driver for SQL Server is installed on your system.
 - The Google Sheets document must be shared with the service account email from your credentials file.
-- If you want to reset the incremental sync, delete `last_request_number.txt`.
+- Each run **replaces all data** in the sheet.
